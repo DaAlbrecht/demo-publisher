@@ -395,6 +395,7 @@ dependencies = [
  "chrono",
  "lapin",
  "lipsum",
+ "rand",
  "tokio",
  "uuid",
 ]

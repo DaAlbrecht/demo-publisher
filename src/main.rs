@@ -6,6 +6,7 @@ use lapin::{
     types::{AMQPValue, FieldTable, ShortString},
     Connection, ConnectionProperties,
 };
+use rand::seq::SliceRandom;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,7 +14,12 @@ async fn main() -> Result<()> {
     let password = std::env::var("AMQP_PASSWORD").unwrap_or("guest".into());
     let host = std::env::var("AMQP_HOST").unwrap_or("localhost".into());
     let amqp_port = std::env::var("AMQP_PORT").unwrap_or("5672".into());
-    let queue_name = "demo";
+    let queue_names = std::env::var("AMQP_QUEUE_NAMES")
+        .unwrap_or("demo".into())
+        .split(",")
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+
     let connection_string = format!(
         "amqp://{}:{}@{}:{}/%2f",
         username, password, host, amqp_port
@@ -23,27 +29,33 @@ async fn main() -> Result<()> {
 
     let channel = connection.create_channel().await?;
 
-    let _ = channel
-        .queue_delete(queue_name, QueueDeleteOptions::default())
-        .await;
+    for queue_name in queue_names.clone() {
+        channel
+            .queue_delete(
+                queue_name.as_str(),
+                QueueDeleteOptions {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let mut queue_args = FieldTable::default();
+        queue_args.insert(
+            ShortString::from("x-queue-type"),
+            AMQPValue::LongString("stream".into()),
+        );
 
-    let mut queue_args = FieldTable::default();
-    queue_args.insert(
-        ShortString::from("x-queue-type"),
-        AMQPValue::LongString("stream".into()),
-    );
-
-    channel
-        .queue_declare(
-            queue_name,
-            QueueDeclareOptions {
-                durable: true,
-                auto_delete: false,
-                ..Default::default()
-            },
-            queue_args,
-        )
-        .await?;
+        channel
+            .queue_declare(
+                queue_name.as_str(),
+                QueueDeclareOptions {
+                    durable: true,
+                    auto_delete: false,
+                    ..Default::default()
+                },
+                queue_args,
+            )
+            .await?;
+    }
 
     loop {
         let data = lipsum::lipsum(20);
@@ -60,7 +72,10 @@ async fn main() -> Result<()> {
         channel
             .basic_publish(
                 "",
-                queue_name,
+                queue_names
+                    .choose(&mut rand::thread_rng())
+                    .ok_or(anyhow::anyhow!("No queue names found"))?
+                    .as_str(),
                 BasicPublishOptions::default(),
                 data,
                 AMQPProperties::default()
@@ -74,6 +89,6 @@ async fn main() -> Result<()> {
             timestamp,
             String::from_utf8_lossy(data)
         );
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 }
