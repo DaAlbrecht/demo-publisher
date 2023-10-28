@@ -9,8 +9,15 @@ use lapin::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let username = std::env::var("AMQP_USERNAME").unwrap_or("guest".into());
+    let password = std::env::var("AMQP_PASSWORD").unwrap_or("guest".into());
+    let host = std::env::var("AMQP_HOST").unwrap_or("localhost".into());
+    let amqp_port = std::env::var("AMQP_PORT").unwrap_or("5672".into());
     let queue_name = "demo";
-    let connection_string = "amqp://guest:guest@127.0.0.1:5672".to_string();
+    let connection_string = format!(
+        "amqp://{}:{}@{}:{}/%2f",
+        username, password, host, amqp_port
+    );
     let connection =
         Connection::connect(&connection_string, ConnectionProperties::default()).await?;
 
