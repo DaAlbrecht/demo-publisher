@@ -6,7 +6,7 @@ use lapin::{
     types::{AMQPValue, FieldTable, ShortString},
     Connection, ConnectionProperties,
 };
-use rand::seq::SliceRandom;
+use rand::{seq::SliceRandom, thread_rng};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
 
     let mut i = 0;
     loop {
-        let data = lipsum::lipsum_words(10);
+        let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
         let data = data.as_bytes();
         let uuid = uuid::Uuid::new_v4();
         let timestamp = Utc::now().timestamp_millis() as u64;
@@ -92,6 +92,8 @@ async fn main() -> Result<()> {
         );
         if i >= 200 {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
         i += 1;
     }
