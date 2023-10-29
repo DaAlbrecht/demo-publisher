@@ -57,8 +57,9 @@ async fn main() -> Result<()> {
             .await?;
     }
 
+    let mut i = 0;
     loop {
-        let data = lipsum::lipsum(20);
+        let data = lipsum::lipsum_words(10);
         let data = data.as_bytes();
         let uuid = uuid::Uuid::new_v4();
         let timestamp = Utc::now().timestamp_millis() as u64;
@@ -89,6 +90,9 @@ async fn main() -> Result<()> {
             timestamp,
             String::from_utf8_lossy(data)
         );
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if i >= 200 {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+        i += 1;
     }
 }
