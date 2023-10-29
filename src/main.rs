@@ -6,7 +6,7 @@ use lapin::{
     types::{AMQPValue, FieldTable, ShortString},
     Connection, ConnectionProperties,
 };
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,12 +57,27 @@ async fn main() -> Result<()> {
             .await?;
     }
 
+    //Hacky to get uneven queue distibution
+    let queue_names = queue_names
+        .iter()
+        .flat_map(|s| {
+            let mut v = vec![s.clone()];
+            let mut rng = rand::thread_rng();
+            let n = rng.gen_range(1..10);
+            for _ in 0..n {
+                v.push(s.clone());
+            }
+            v
+        })
+        .collect::<Vec<String>>();
+
     let mut i = 0;
     loop {
-        let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
-        let data = data.as_bytes();
         let uuid = uuid::Uuid::new_v4();
         let timestamp = Utc::now().timestamp_millis() as u64;
+        let data = lipsum::lipsum_words_with_rng(thread_rng(), 10);
+        let data = format!("{} {} {}", uuid, timestamp, data);
+        let data = data.as_bytes();
         let transaction_id = format!("transaction_{}", uuid);
         let mut headers = FieldTable::default();
         headers.insert(
