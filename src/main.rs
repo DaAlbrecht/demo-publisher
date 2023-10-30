@@ -6,7 +6,7 @@ use lapin::{
     types::{AMQPValue, FieldTable, ShortString},
     Connection, ConnectionProperties,
 };
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{seq::SliceRandom, thread_rng, Rng};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,10 +15,16 @@ async fn main() -> Result<()> {
     let host = std::env::var("AMQP_HOST").unwrap_or("localhost".into());
     let amqp_port = std::env::var("AMQP_PORT").unwrap_or("5672".into());
     let queue_names = std::env::var("AMQP_QUEUE_NAMES")
-        .unwrap_or("demo".into())
-        .split(",")
+        .to_owned()
+        .unwrap_or("demo".to_string())
+        .split(',')
         .map(|s| s.to_string())
-        .collect::<Vec<String>>();
+        .enumerate()
+        .map(|(i, name)| match i == 0 {
+            true => (name, 4),
+            false => (name, thread_rng().gen_range(1..2)),
+        })
+        .collect::<Vec<(String, u8)>>();
 
     let connection_string = format!(
         "amqp://{}:{}@{}:{}/%2f",
@@ -32,7 +38,7 @@ async fn main() -> Result<()> {
     for queue_name in queue_names.clone() {
         channel
             .queue_delete(
-                queue_name.as_str(),
+                queue_name.0.as_str(),
                 QueueDeleteOptions {
                     ..Default::default()
                 },
@@ -46,7 +52,7 @@ async fn main() -> Result<()> {
 
         channel
             .queue_declare(
-                queue_name.as_str(),
+                queue_name.0.as_str(),
                 QueueDeclareOptions {
                     durable: true,
                     auto_delete: false,
@@ -74,8 +80,9 @@ async fn main() -> Result<()> {
             .basic_publish(
                 "",
                 queue_names
-                    .choose(&mut rand::thread_rng())
-                    .ok_or(anyhow::anyhow!("No queue names found"))?
+                    .choose_weighted(&mut thread_rng(), |item| item.1)
+                    .expect("No queue name found")
+                    .0
                     .as_str(),
                 BasicPublishOptions::default(),
                 data,
@@ -84,13 +91,7 @@ async fn main() -> Result<()> {
                     .with_timestamp(timestamp),
             )
             .await?;
-        println!(
-            "Published message with transaction id: {}, timestamp: {} and data: {}",
-            transaction_id.clone(),
-            timestamp,
-            String::from_utf8_lossy(data)
-        );
-        if i >= 200 {
+        if i >= 500 {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         } else {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
