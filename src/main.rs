@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 struct Queue {
     queue: String,
+    total: Option<u8>,
 }
 pub struct AppState {
     pool: deadpool_lapin::Pool,
@@ -65,7 +66,7 @@ async fn publish(app_state: State<Arc<AppState>>, Query(queue): Query<Queue>) ->
     let queue_name = queue.queue;
     let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
 
-    for _ in 0..10 {
+    for _ in 0..queue.total.unwrap_or(10) {
         channel
             .basic_publish(
                 "",
