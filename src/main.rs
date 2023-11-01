@@ -1,12 +1,30 @@
+use std::sync::Arc;
+
 use anyhow::Result;
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+    Router,
+};
 use chrono::Utc;
+use deadpool_lapin::{PoolConfig, Runtime};
 use lapin::{
     options::{BasicPublishOptions, QueueDeclareOptions, QueueDeleteOptions},
     protocol::basic::AMQPProperties,
     types::{AMQPValue, FieldTable, ShortString},
-    Connection, ConnectionProperties,
 };
 use rand::{seq::SliceRandom, thread_rng, Rng};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct Queue {
+    queue: String,
+}
+pub struct AppState {
+    pool: deadpool_lapin::Pool,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -14,6 +32,55 @@ async fn main() -> Result<()> {
     let password = std::env::var("AMQP_PASSWORD").unwrap_or("guest".into());
     let host = std::env::var("AMQP_HOST").unwrap_or("localhost".into());
     let amqp_port = std::env::var("AMQP_PORT").unwrap_or("5672".into());
+    let cfg = deadpool_lapin::Config {
+        url: Some(format!(
+            "amqp://{}:{}@{}:{}/%2f",
+            username, password, host, amqp_port
+        )),
+        pool: Some(PoolConfig::new(10)),
+        ..Default::default()
+    };
+    let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+
+    let app_state = Arc::new(AppState { pool: pool.clone() });
+
+    init(pool).await?;
+    // build our application with a single route
+    let app = Router::new()
+        .route("/publish", post(publish))
+        .with_state(app_state);
+
+    // run it with hyper on localhost:3000
+    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+    Ok(())
+}
+
+async fn publish(app_state: State<Arc<AppState>>, Query(queue): Query<Queue>) -> impl IntoResponse {
+    println!("Publishing to queue {}", queue.queue);
+    let connection = app_state.pool.get().await.unwrap();
+    let channel = connection.create_channel().await.unwrap();
+    let queue_name = queue.queue;
+    let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
+
+    for _ in 0..10 {
+        channel
+            .basic_publish(
+                "",
+                queue_name.as_str(),
+                BasicPublishOptions::default(),
+                data.as_bytes(),
+                AMQPProperties::default(),
+            )
+            .await
+            .unwrap();
+    }
+    (StatusCode::CREATED, "Published")
+}
+
+async fn init(pool: deadpool_lapin::Pool) -> Result<()> {
     let queue_names = std::env::var("AMQP_QUEUE_NAMES")
         .to_owned()
         .unwrap_or("demo".to_string())
@@ -26,12 +93,7 @@ async fn main() -> Result<()> {
         })
         .collect::<Vec<(String, u8)>>();
 
-    let connection_string = format!(
-        "amqp://{}:{}@{}:{}/%2f",
-        username, password, host, amqp_port
-    );
-    let connection =
-        Connection::connect(&connection_string, ConnectionProperties::default()).await?;
+    let connection = pool.get().await?;
 
     let channel = connection.create_channel().await?;
 
@@ -63,8 +125,7 @@ async fn main() -> Result<()> {
             .await?;
     }
 
-    let mut i = 0;
-    loop {
+    for _ in 0..100 {
         let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
         let data = data.as_bytes();
         let uuid = uuid::Uuid::new_v4();
@@ -91,11 +152,7 @@ async fn main() -> Result<()> {
                     .with_timestamp(timestamp),
             )
             .await?;
-        if i >= 500 {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        } else {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
-        i += 1;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
+    Ok(())
 }
