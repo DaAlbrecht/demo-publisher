@@ -65,6 +65,14 @@ async fn publish(app_state: State<Arc<AppState>>, Query(queue): Query<Queue>) ->
     let channel = connection.create_channel().await.unwrap();
     let queue_name = queue.queue;
     let data = lipsum::lipsum_words_with_rng(thread_rng(), 23);
+    let uuid = uuid::Uuid::new_v4();
+    let timestamp = Utc::now().timestamp_millis() as u64;
+    let transaction_id = format!("transaction_{}", uuid);
+    let mut headers = FieldTable::default();
+    headers.insert(
+        ShortString::from("x-stream-transaction-id"),
+        AMQPValue::LongString(transaction_id.clone().into()),
+    );
 
     for _ in 0..queue.total.unwrap_or(10) {
         channel
@@ -73,7 +81,9 @@ async fn publish(app_state: State<Arc<AppState>>, Query(queue): Query<Queue>) ->
                 queue_name.as_str(),
                 BasicPublishOptions::default(),
                 data.as_bytes(),
-                AMQPProperties::default(),
+                AMQPProperties::default()
+                    .with_timestamp(timestamp)
+                    .with_headers(headers.clone()),
             )
             .await
             .unwrap();
