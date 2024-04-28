@@ -1,5 +1,5 @@
 # Build Stage 
-FROM rust:1.73.0-slim-buster as builder
+FROM rust:1.77.0-slim-buster as builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -39,7 +39,7 @@ COPY --from=builder /demo-publisher/target/release/demo_publisher ${APP}/demo_pu
 
 RUN chown -R $APP_USER:$APP_USER ${APP}
 
-USER $APP_USER
+USER 10001
 WORKDIR ${APP}
 
 CMD ["./demo_publisher"]
